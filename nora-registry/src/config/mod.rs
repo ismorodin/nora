@@ -2827,6 +2827,7 @@ proxies = [
         config.retention.rules = vec![RetentionRule {
             registry: "docker".to_string(),
             name_glob: None,
+            version_patterns: Vec::new(),
             keep_last: Some(5),
             older_than_days: None,
             exclude_tags: Vec::new(),

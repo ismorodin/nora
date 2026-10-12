@@ -267,6 +267,7 @@ that can diverge from the actual files on disk.
 - `cp -r /data/ backup/` is a complete, consistent backup
 - No schema migrations, no WAL corruption, no `VACUUM`
 - Retention uses file mtime (publish date) — no metadata DB needed
+- Retention rules can optionally restrict deletion to version glob patterns (`*`, `?`)
 - Search uses in-memory HashMap rebuilt on startup (~5ms for 10k packages)
 - Token storage uses `tokens.json` — same pattern as htpasswd
 - Docker Distribution serves Docker Hub at scale with pure filesystem storage

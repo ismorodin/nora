@@ -17,6 +17,10 @@ pub struct RetentionRule {
     /// registry. First matching rule wins, so put specific rules first.
     #[serde(default)]
     pub name_glob: Option<String>,
+    /// Optional glob patterns matched against version names. When non-empty,
+    /// only versions matching at least one pattern are eligible for deletion.
+    #[serde(default)]
+    pub version_patterns: Vec<String>,
     /// Keep the N most recent versions
     #[serde(default)]
     pub keep_last: Option<u32>,
@@ -76,5 +80,23 @@ impl RetentionConfig {
         if let Ok(val) = env::var("NORA_RETENTION_DRY_RUN") {
             self.dry_run = val.to_lowercase() == "true" || val == "1";
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RetentionRule;
+
+    #[test]
+    fn old_retention_rule_config_defaults_version_patterns_to_empty() {
+        let rule: RetentionRule = toml::from_str(
+            r#"
+registry = "maven"
+older_than_days = 30
+"#,
+        )
+        .unwrap();
+
+        assert!(rule.version_patterns.is_empty());
     }
 }

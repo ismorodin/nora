@@ -89,6 +89,7 @@ pub struct DeletionPlan {
 /// Rules applied as AND:
 /// - `keep_last`: keep the N most recent versions (by modified time)
 /// - `older_than_days`: only delete versions older than X days
+/// - `version_patterns`: when non-empty, only matching versions are eligible
 /// - `exclude_tags`: glob patterns that protect versions from deletion
 ///
 /// A version is deleted only if ALL conditions agree it should go.
@@ -112,6 +113,17 @@ pub fn plan_deletions(
     let mut non_excluded_pos: usize = 0;
 
     for version in &versions {
+        // A version filter selects the population to which keep_last applies;
+        // unmatched versions are left untouched and do not consume its budget.
+        if !rule.version_patterns.is_empty()
+            && !rule
+                .version_patterns
+                .iter()
+                .any(|pattern| glob_match(pattern, &version.name))
+        {
+            continue;
+        }
+
         // Check exclusion patterns — excluded versions are invisible to keep_last (#926)
         if is_excluded(&version.name, &rule.exclude_tags) {
             continue;
@@ -1051,6 +1063,7 @@ mod tests {
         RetentionRule {
             registry: "*".to_string(),
             name_glob: None,
+            version_patterns: Vec::new(),
             keep_last,
             older_than_days,
             exclude_tags: exclude_tags.into_iter().map(String::from).collect(),
@@ -1135,6 +1148,57 @@ mod tests {
         let plans = plan_deletions(versions, &rule, NOW);
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].version_name, "old");
+    }
+
+    #[test]
+    fn test_version_patterns_filter_by_glob_and_age() {
+        let versions = vec![
+            make_version("1.0-SNAPSHOT", NOW - 31 * DAY, 100),
+            make_version("0.14.0-dev.11.e47ab9f", NOW - 31 * DAY, 200),
+            make_version("1.0", NOW - 31 * DAY, 300),
+            make_version("2.0-SNAPSHOT", NOW - 2 * DAY, 400),
+        ];
+        let mut rule = make_rule(None, Some(30), vec![]);
+        rule.version_patterns = vec!["*-SNAPSHOT".into(), "*-dev.*".into()];
+
+        let plans = plan_deletions(versions, &rule, NOW);
+        let names: Vec<_> = plans
+            .iter()
+            .map(|plan| plan.version_name.as_str())
+            .collect();
+        assert_eq!(names, vec!["1.0-SNAPSHOT", "0.14.0-dev.11.e47ab9f"]);
+    }
+
+    #[test]
+    fn test_version_patterns_filter_keep_last_population() {
+        let versions = vec![
+            make_version("2.0-SNAPSHOT", NOW, 100),
+            make_version("2.0", NOW - DAY, 200),
+            make_version("1.0-SNAPSHOT", NOW - 2 * DAY, 300),
+        ];
+        let mut rule = make_rule(Some(1), None, vec![]);
+        rule.version_patterns = vec!["*-SNAPSHOT".into()];
+
+        let plans = plan_deletions(versions, &rule, NOW);
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].version_name, "1.0-SNAPSHOT");
+    }
+
+    #[test]
+    fn test_version_patterns_respect_exclusions_and_empty_is_compatible() {
+        let versions = vec![
+            make_version("1.0-SNAPSHOT", NOW - 30 * DAY, 100),
+            make_version("2.0-SNAPSHOT", NOW - 20 * DAY, 200),
+        ];
+        let mut rule = make_rule(None, Some(10), vec!["2.*"]);
+        rule.version_patterns = vec!["*-SNAPSHOT".into()];
+        let plans = plan_deletions(versions.clone(), &rule, NOW);
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].version_name, "1.0-SNAPSHOT");
+
+        // An absent/empty field preserves the prior age-only behavior.
+        let legacy_rule = make_rule(None, Some(10), vec![]);
+        assert_eq!(plan_deletions(versions, &legacy_rule, NOW).len(), 2);
     }
 
     #[test]
@@ -1744,6 +1808,7 @@ mod tests {
         let rules = vec![RetentionRule {
             registry: "docker".to_string(),
             name_glob: None,
+            version_patterns: Vec::new(),
             keep_last: Some(3),
             older_than_days: None,
             exclude_tags: vec![],
@@ -1792,6 +1857,7 @@ mod tests {
         let rules = vec![RetentionRule {
             registry: "docker".to_string(),
             name_glob: None,
+            version_patterns: Vec::new(),
             keep_last: Some(3),
             older_than_days: None,
             exclude_tags: vec![],
@@ -1825,6 +1891,7 @@ mod tests {
         let rules = vec![RetentionRule {
             registry: "maven".to_string(),
             name_glob: None,
+            version_patterns: Vec::new(),
             keep_last: Some(1),
             older_than_days: None,
             exclude_tags: vec![],
@@ -1855,6 +1922,7 @@ mod tests {
         let rules = vec![RetentionRule {
             registry: "maven".to_string(),
             name_glob: None,
+            version_patterns: Vec::new(),
             keep_last: Some(1),
             older_than_days: None,
             exclude_tags: vec![],
@@ -1882,6 +1950,7 @@ mod tests {
         let rules = vec![RetentionRule {
             registry: "docker".to_string(),
             name_glob: None,
+            version_patterns: Vec::new(),
             keep_last: Some(1),
             older_than_days: None,
             exclude_tags: vec![],
@@ -1908,6 +1977,7 @@ mod tests {
         let rules = vec![RetentionRule {
             registry: "*".to_string(),
             name_glob: None,
+            version_patterns: Vec::new(),
             keep_last: Some(1),
             older_than_days: None,
             exclude_tags: vec![],
@@ -1947,6 +2017,7 @@ mod tests {
         let rules = vec![RetentionRule {
             registry: "go".to_string(),
             name_glob: None,
+            version_patterns: Vec::new(),
             keep_last: Some(1),
             older_than_days: None,
             exclude_tags: vec![],
@@ -1984,6 +2055,7 @@ mod format_retention_tests {
         RetentionRule {
             registry: registry.into(),
             name_glob: glob.map(String::from),
+            version_patterns: Vec::new(),
             keep_last: keep,
             older_than_days: days,
             exclude_tags: vec![],
